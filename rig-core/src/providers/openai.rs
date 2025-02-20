@@ -8,7 +8,7 @@
 //!
 //! let gpt4o = client.completion_model(openai::GPT_4O);
 //! ```
-use std::{convert::Infallible, str::FromStr};
+use std::{convert::Infallible, str::FromStr, sync::Arc};
 
 use crate::{
     agent::AgentBuilder,
@@ -33,6 +33,8 @@ const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
 pub struct Client {
     base_url: String,
     http_client: reqwest::Client,
+    pre_request_hook: Option<Arc<dyn Fn(serde_json::Value) + Send + Sync + 'static>>,
+    post_response_hook: Option<Arc<dyn Fn(serde_json::Value) + Send + Sync + 'static>>,
 }
 
 impl Client {
@@ -58,6 +60,8 @@ impl Client {
                 })
                 .build()
                 .expect("OpenAI reqwest client should build"),
+            pre_request_hook: None,
+            post_response_hook: None,
         }
     }
 
@@ -169,6 +173,24 @@ impl Client {
         model: &str,
     ) -> ExtractorBuilder<T, CompletionModel> {
         ExtractorBuilder::new(self.completion_model(model))
+    }
+
+    /// Set a pre-request hook.
+    pub fn with_pre_request_hook(
+        mut self,
+        hook: Arc<dyn Fn(serde_json::Value) + Send + Sync + 'static>,
+    ) -> Self {
+        self.pre_request_hook = Some(hook);
+        self
+    }
+
+    /// Set a post-response hook.
+    pub fn with_post_response_hook(
+        mut self,
+        hook: Arc<dyn Fn(serde_json::Value) + Send + Sync + 'static>,
+    ) -> Self {
+        self.post_response_hook = Some(hook);
+        self
     }
 }
 
@@ -361,7 +383,7 @@ pub const GPT_35_TURBO_1106: &str = "gpt-3.5-turbo-1106";
 /// `gpt-3.5-turbo-instruct` completion model
 pub const GPT_35_TURBO_INSTRUCT: &str = "gpt-3.5-turbo-instruct";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct CompletionResponse {
     pub id: String,
     pub object: String,
@@ -414,6 +436,7 @@ impl TryFrom<CompletionResponse> for completion::CompletionResponse<CompletionRe
                         })
                         .collect::<Vec<_>>(),
                 );
+
                 Ok(content)
             }
             _ => Err(CompletionError::ResponseError(
@@ -434,7 +457,7 @@ impl TryFrom<CompletionResponse> for completion::CompletionResponse<CompletionRe
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Choice {
     pub index: usize,
     pub message: Message,
@@ -925,25 +948,36 @@ impl completion::CompletionModel for CompletionModel {
             request
         };
 
+        let json_body = &if let Some(params) = completion_request.additional_params {
+            json_utils::merge(request, params)
+        } else {
+            request
+        };
+
+        // Call pre-request hook if available
+        if let Some(pre_hook) = &self.client.pre_request_hook {
+            pre_hook(json_body.clone());
+        }
+
         let response = self
             .client
             .post("/chat/completions")
-            .json(
-                &if let Some(params) = completion_request.additional_params {
-                    json_utils::merge(request, params)
-                } else {
-                    request
-                },
-            )
+            .json(json_body)
             .send()
             .await?;
 
         if response.status().is_success() {
             let t = response.text().await?;
+            // println!("response text: {}", t);
             tracing::debug!(target: "rig", "OpenAI completion error: {}", t);
 
             match serde_json::from_str::<ApiResponse<CompletionResponse>>(&t)? {
                 ApiResponse::Ok(response) => {
+                    // Call post-response hook if available
+                    if let Some(post_hook) = &self.client.post_response_hook {
+                        post_hook(serde_json::from_str(&t).unwrap());
+                    }
+
                     tracing::info!(target: "rig",
                         "OpenAI completion token usage: {:?}",
                         response.usage.clone().map(|usage| format!("{usage}")).unwrap_or("N/A".to_string())

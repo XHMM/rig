@@ -75,7 +75,7 @@ use crate::{
     tool::ToolSetError,
 };
 
-use super::message::AssistantContent;
+use super::message::{AssistantContent, ChatResponseMessage};
 
 // Errors
 #[derive(Debug, Error)]
@@ -181,6 +181,12 @@ pub trait Chat: Send + Sync {
         prompt: impl Into<Message> + Send,
         chat_history: Vec<Message>,
     ) -> impl std::future::Future<Output = Result<String, PromptError>> + Send;
+
+    fn chat2(
+        &self,
+        prompt: impl Into<Message> + Send,
+        chat_history: Vec<Message>,
+    ) -> impl std::future::Future<Output = Result<Vec<ChatResponseMessage>, PromptError>> + Send;
 }
 
 /// Trait defining a low-level LLM completion interface

@@ -115,7 +115,7 @@ use crate::{
         Chat, Completion, CompletionError, CompletionModel, CompletionRequestBuilder, Document,
         Message, Prompt, PromptError,
     },
-    message::AssistantContent,
+    message::{AssistantContent, ChatResponseMessage},
     streaming::{
         StreamingChat, StreamingCompletion, StreamingCompletionModel, StreamingPrompt,
         StreamingResult,
@@ -315,6 +315,38 @@ impl<M: CompletionModel> Chat for Agent<M> {
                 )
                 .await?),
         }
+    }
+
+    async fn chat2(
+        &self,
+        prompt: impl Into<Message> + Send,
+        chat_history: Vec<Message>,
+    ) -> Result<Vec<ChatResponseMessage>, PromptError> {
+        let resp = self.completion(prompt, chat_history).await?.send().await?;
+
+        let mut results = vec![];
+        for choice in resp.choice {
+            match &choice {
+                AssistantContent::Text(text) => {
+                    results.push(ChatResponseMessage::Text(text.text.clone()))
+                }
+
+                AssistantContent::ToolCall(tool_call) => {
+                    let res = self
+                        .tools
+                        .call(
+                            &tool_call.function.name,
+                            tool_call.function.arguments.to_string(),
+                        )
+                        .await;
+                    match res {
+                        Ok(text) => results.push(ChatResponseMessage::ToolResult(text)),
+                        Err(e) => return Err(PromptError::ToolError(e)),
+                    }
+                }
+            }
+        }
+        Ok(results)
     }
 }
 

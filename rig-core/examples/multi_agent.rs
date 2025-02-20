@@ -4,7 +4,7 @@ use rig::{
     agent::{Agent, AgentBuilder},
     cli_chatbot::cli_chatbot,
     completion::{Chat, CompletionModel, PromptError},
-    message::Message,
+    message::{ChatResponseMessage, Message},
     providers::openai::Client as OpenAIClient,
 };
 
@@ -52,6 +52,14 @@ impl<M: CompletionModel> Chat for EnglishTranslator<M> {
         self.gpt4
             .chat(translated_prompt.as_str(), chat_history)
             .await
+    }
+
+    async fn chat2(
+        &self,
+        prompt: impl Into<Message> + Send,
+        chat_history: Vec<Message>,
+    ) -> Result<Vec<ChatResponseMessage>, PromptError> {
+        Ok(vec![])
     }
 }
 

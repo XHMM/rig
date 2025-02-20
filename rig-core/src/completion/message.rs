@@ -81,6 +81,13 @@ pub struct ToolFunction {
     pub arguments: serde_json::Value,
 }
 
+/// Describes a response message from a chat completion, which can be text or a tool result.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChatResponseMessage {
+    Text(String),
+    ToolResult(String),
+}
+
 // ================================================================
 // Base content models
 // ================================================================
